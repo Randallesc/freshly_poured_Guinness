@@ -1,0 +1,184 @@
+---
+title: "Real Estate Market Analysis"
+author: 'By: Randall Escalante'
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+  word_document: default
+---
+
+## The Data
+The data set used for this analysis was gathered from Zillow.com, and includes 1 bed, 1-2 bathroom condominium units ranging in size from 400 - 1577 square feet. All 256 observations have were sold in San Mateo, CA within the 94401 area code from July 2017 through July 2020. These residences were collected to be used as comparable sales to a 1 bed, 1 bath, 725 square foot condominium in the same area code.
+
+```{r}
+library(tidyverse)
+library(xts)
+library(ggplot2)
+library(forecast)
+library(readr)
+data <- read_csv("san_mateo_condos_1.csv")
+head(data)
+```
+
+A bit of data cleaning.
+
+```{r}
+data$date_sold <-str_remove(data$date_sold, fixed("Sold "))
+data$sqft <- str_remove(data$sqft, fixed(" sqft"))
+data$price_sold <- str_remove(data$price_sold, fixed("$"))
+data$price_sold <- str_remove(data$price_sold, ",")
+data$price_sold <- str_remove(data$price_sold, ",")
+data$sqft <- str_remove(data$sqft, fixed(","))
+```
+
+Formatting the and creating new attributes to be compatible with timeseries analysis.
+
+```{r}
+date <- as.Date(data$date_sold, format = "%m/%d/%Y")
+price <- as.numeric(data$price_sold)
+size <- as.numeric(data$sqft)
+ppsqft <- price/size
+ppsqft <- round(ppsqft, digits = 2)
+num <- nrow(data) -1
+lag <- c(NA, ppsqft[1:num])
+d_ppsqft <- ppsqft - lag
+pct_change <- (d_ppsqft/ppsqft)*100
+```
+
+Summary statistics for Price:
+
+```{r}
+summary(price)
+```
+
+Summary statistics for square footage:
+
+```{r}
+summary(size)
+```
+
+Summary statistics for price per-square-foot:
+
+```{r}
+summary(ppsqft)
+```
+
+Summary statistics for Percentage Change in Price:
+
+```{r}
+summary(pct_change)
+```
+
+## Formatting for Time Series Analysis
+
+```{r}
+#converting price to xts
+price.xts <- as.xts(price, date)
+#converting to monthly average
+price.xts.mo.av <- apply.monthly(price.xts, mean)
+price.xts.mo.av <- round(price.xts.mo.av, digits = 2)
+
+#converting ppsqft to xts
+ppsqft.xts <- as.xts(ppsqft, date)
+#converting to montly average
+ppsqft.xts.mo.av <- apply.monthly(ppsqft.xts, mean)
+ppsqft.xts.mo.av <- round(ppsqft.xts.mo.av, digits = 2)
+
+#converting d_ppsqft to xts
+d_ppsqft.xts <- as.xts(d_ppsqft, date)
+#converting to monthly average
+d_ppsqft.xts.mo.av <- apply.monthly(d_ppsqft.xts, mean)
+d_ppsqft.xts.mo.av <- round(d_ppsqft.xts.mo.av, digits = 2)
+View(d_ppsqft.xts.mo.av)
+
+#converting pct_change to xts
+pct_change.xts <- as.xts(pct_change, date)
+#converting to monthly average
+pct_change.xts.mo.av <- apply.monthly(pct_change.xts, mean)
+pct_change.xts.mo.av <- round(pct_change.xts.mo.av, digits = 2)
+```
+
+### Monthly Average Condo Sales Price
+
+```{r}
+autoplot.zoo(price.xts.mo.av) + ggtitle("Average Monthly Condo Sales Price") + ylab("Price") + xlab("Time")
+```
+
+### Monthly Average Price per-square-foot
+
+```{r}
+autoplot.zoo(ppsqft.xts.mo.av) + ggtitle("Average Monthly Price per-square-foot") + ylab("Price") + xlab("Time")
+```
+
+##### 12 month Average
+
+```{r}
+mean(ppsqft.xts.mo.av[24:36])
+```
+
+##### 3 month Average
+```{r}
+mean(ppsqft.xts.mo.av[33:36])
+```
+
+
+### Change in Monthly Average per-square-foot Price
+
+```{r}
+autoplot.zoo(d_ppsqft.xts.mo.av) + ggtitle("Change in Avg Monthly per-square-foot price") + ylab("Price per-square-foot") + xlab("Time")
+```
+##### 12 month Average 
+```{r}
+mean(d_ppsqft.xts.mo.av[23:35])
+```
+##### 3 month Average
+```{r}
+mean(d_ppsqft.xts.mo.av[32:35])
+```
+
+
+### Percentage Change in Average Monthly per-square-foot Price
+
+```{r}
+autoplot.zoo(pct_change.xts.mo.av) + ggtitle("Percentage Change in Avg Monthly per-square-foot Price") + ylab("% Price") + xlab("Time")
+```
+##### 12 month Average
+```{r}
+mean(pct_change.xts.mo.av[23:35])
+```
+##### 3 month Average
+```{r}
+mean(pct_change.xts.mo.av[32:35])
+```
+
+
+### Time Series forecast for Monthly Average Change in per-square-foot Price (ARIMA(0,0,1))
+
+```{r}
+fit1 <- auto.arima(d_ppsqft.xts.mo.av)
+fit1 %>% forecast(h=3) %>% autoplot() + ggtitle("Monthly Avg Change in per-square-foot Price ARIMA (0,0,1) forecast") + ylab("Dollars") + geom_hline(yintercept = 8.5, linetype ="dashed", color="blue") + geom_text(aes(y=20, label="+8.5", x=0, color="red", hjust=0.75)) + geom_vline(xintercept=2.5e+06) + geom_text(aes(x=2.5e+06, label="2020", y=75, angle=90, vjust=-1))+ theme(legend.position="none")
+```
+The expected value for the 3 month forcasted price change is +$8.5. 
+
+The dark blue region represents the 80% confidence interval, upper bound: +$72, lower bound: -$55. 
+
+The light blue region represents the 90% confidence interval, upper bound: +$105, lower bound: -$80.
+
+
+### Time Series forecast for Monthly Average Percentage Change in per-square-foot Price (ARIMA(0,0,0))
+
+```{r}
+fit2 <- auto.arima(pct_change.xts.mo.av) 
+fit2 %>% forecast(h=3) %>% autoplot() + ggtitle("Monthly Avg % Change in per_square-foot Price ARIMA (0,0,0) forecast") + ylab("Percentage") + geom_hline(yintercept = -9, linetype ="dashed", color="red") + geom_text(aes(y=-15, label="-9", x=0, color="red")) + geom_vline(xintercept=2.5e+06) + geom_text(aes(x=2.5e+06, label="2020", y=-40, angle=90, vjust=-1)) + theme(legend.position="none")
+```
+The expected value for the 3 month forcasted percentage price change is -9%. 
+
+The dark blue region represents the 80% confidence interval, upper bound: +16%, lower bound: -34%. 
+
+The light blue region represents the 90% confidence interval, upper bound: +30%, lower bound: -46%.
+
+
+
+
